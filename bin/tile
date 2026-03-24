@@ -35,8 +35,8 @@ def run_show(args):
     log.info('tile shift (x, y) in pixels: (%d, %d)' % (x_shift, y_shift))
     log.warning('tile overlap (x, y) in pixels: (%d, %d)' % (data_shape[2]-x_shift, data_shape[1]-y_shift))
 
-    index = [f'x_{num}' for num in range(grid.shape[0])]
-    columns = [f'y_{num}' for num in range(grid.shape[1])]
+    index = [f'y_{num}' for num in range(grid.shape[0])]
+    columns = [f'x_{num}' for num in range(grid.shape[1])]
     log.info('tile file name grid:\n%s' % pd.DataFrame(grid, columns=columns, index=index))
 
 def run_center(args):
