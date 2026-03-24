@@ -79,7 +79,7 @@ def center(args):
         step=1    
     if args.rotation_axis==-1:
         args.rotation_axis = data_shape[2]//2
-        log.warning('Rotation in pixel: (%d)' % (rotation_axis))
+        log.warning('Rotation in pixel: (%d)' % (args.rotation_axis))
     # ids for slice and projection for shifts testing
     idslice = int((data_shape[1]-1)*args.nsino)
     idproj = int((data_shape[0]-1)*args.nprojection)
