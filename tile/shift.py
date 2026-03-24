@@ -138,7 +138,7 @@ def center(args):
         f.add_entry(dx.Entry.data(theta={'value': theta*180/np.pi, 'units':'degrees'}))
         f.close()
     log.info(f'Created a temporary hdf file: {tmp_file_name}')
-    cmd = f'{args.recon_engine} recon --file-type double_fov --binning {args.binning} --reconstruction-type try --file-name {tmp_file_name} \
+    cmd = f'{args.recon_engine} recon --file-type {args.file_type} --binning {args.binning} --reconstruction-type try --file-name {tmp_file_name} \
             --center-search-width {args.center_search_width} --rotation-axis-auto manual --rotation-axis {args.rotation_axis} \
             --center-search-step {args.center_search_step} --end-column {args.end_column} --nsino-per-chunk {2**args.binning}'
     log.warning(cmd)

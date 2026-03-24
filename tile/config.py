@@ -184,7 +184,12 @@ SECTIONS['center'] = {
         'type': int,
         'default': -1,
         'help': 'End column in x',
-    }
+    },
+    'file-type': {
+        'type': str,
+        'default': 'standard',
+        'help': "Tomocupy file type: standard or double_fov",
+    },
 }
 
 
