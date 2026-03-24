@@ -56,6 +56,19 @@ __all__ = ['shift_manual',
           ]
 
 
+def _next_smooth(n):
+    """Return the smallest integer >= n whose prime factors are all in {2, 3, 5}."""
+    candidate = n
+    while True:
+        m = candidate
+        for p in (2, 3, 5):
+            while m % p == 0:
+                m //= p
+        if m == 1:
+            return candidate
+        candidate += 1
+
+
 def center(args):
     """Find rotation axis location"""
 
@@ -84,8 +97,10 @@ def center(args):
     idslice = int((data_shape[1]-1)*args.nsino)
     idproj = int((data_shape[0]-1)*args.nprojection)
 
-    # data size after stitching
-    size = int(np.ceil((data_shape[2]+(grid.shape[1]-1)*x_shift)/2**(args.binning+4))*2**(args.binning+4))
+    # data size after stitching, rounded up to a cuFFT-friendly number
+    # (product of small primes 2,3,5 only, so FFT size 4*size avoids prime factors > 5)
+    raw_size = data_shape[2] + (grid.shape[1]-1)*x_shift
+    size = _next_smooth(raw_size)
     data_all = np.ones([data_shape[0],2**args.binning,size],dtype=data_type)
     dark_all = np.zeros([1,2**args.binning,size],dtype=data_type)
     flat_all = np.ones([1,2**args.binning,size],dtype=data_type)
