@@ -1,498 +1,641 @@
 =====
 Usage
 =====
- 
-1. Verify the dataset is valid
-==============================
 
-Tile needs the following experiment meta data to automatically sort the mosaic tiles by location and set the initial overlapping conditions:
+Overview
+========
 
-#. X-Y location of each tile in mm
-#. the projection image pixel size in microns
-#. the tile data set full file name
+**tile** is a command-line tool for stitching tomographic mosaic datasets — sets of overlapping
+scans that together cover a field of view larger than a single detector frame.
 
-At the APS beamline `2 BM <https://docs2bm.readthedocs.io/en/latest/>`_, these meta data are automatically stored at data collection time in an hdf file compliant with `dxfile <https://dxfile.readthedocs.io/en/latest/index.html>`_ following this layout:
+The full pipeline from raw HDF5 files to a reconstructed 3D volume has the following steps.
+Not all steps are required for every dataset; the table below shows which are optional.
+
+.. list-table::
+   :widths: 5 20 10 65
+   :header-rows: 1
+
+   * - #
+     - Command
+     - Required?
+     - What it does
+   * - 1
+     - ``tile show``
+     - Yes
+     - Verify the dataset — print tile grid, image size, nominal overlap
+   * - 2
+     - ``tile bin``
+     - Optional
+     - Spatially bin raw files to reduce data volume before processing
+   * - 3
+     - ``tile dump-flats``
+     - Optional
+     - Collect a flat field basis for per-projection NNLS flat correction
+   * - 4
+     - ``tile panoramic``
+     - Optional
+     - Quick visual check — save one stitched projection to a tiff
+   * - 5
+     - ``tile center``
+     - Yes
+     - Find the rotation axis location (trial reconstruction stack)
+   * - 6
+     - ``tile shift``
+     - Yes
+     - Fine-tune horizontal tile positions
+   * - 7
+     - ``tile stitch``
+     - Yes
+     - Horizontally stitch all tiles in each y-row → ``tile.h5``
+   * - 8
+     - ``tile vstitch``
+     - Multi-row only
+     - Vertically stitch the per-row ``tile.h5`` files → ``vstitch.h5``
+   * - 9
+     - ``tile double-fov``
+     - 360° scans only
+     - Convert 360° dataset to 180° by stitching paired projections
+   * - 10
+     - ``tomocupy recon``
+     - Yes
+     - Final 3D reconstruction
 
 
-.. image:: img/hdf_00.png
-   :width: 200px
-   :alt: project
+HDF5 metadata requirements
+===========================
 
-.. image:: img/hdf_01.png
-   :width: 200px
-   :alt: project
+tile reads the following metadata from each HDF5 file to sort tiles by position and compute the
+nominal overlap:
 
-.. image:: img/hdf_02.png
-   :width: 200px
-   :alt: project
+#. Sample X position (mm): ``/measurement/instrument/sample_motor_stack/setup/x``
+#. Sample Y position (mm): ``/measurement/instrument/sample_motor_stack/setup/y``
+#. Image resolution (µm/px): ``/measurement/instrument/detection_system/objective/resolution``
+#. Original file name: ``/measurement/sample/file/full_name``
 
-#. sample_x  (mm)         = '/measurement/instrument/sample_motor_stack/setup/x'
-#. sample_y  (mm)         = '/measurement/instrument/sample_motor_stack/setup/y'
-#. resolution (micron)    = '/measurement/instrument/detection_system/objective/resolution'
-#. full_file_name         = '/measurement/sample/file/full_name'
+These paths follow the `dxfile <https://dxfile.readthedocs.io/en/latest/source/demo/doc.areadetector.html#xml>`_
+convention used at `2-BM <https://docs2bm.readthedocs.io/en/latest/>`_,
+`7-BM <https://docs7bm.readthedocs.io/en/latest/>`_, and
+`32-ID <https://docs32id.readthedocs.io/en/latest/>`_.
 
+If your metadata is stored elsewhere, override the paths at runtime::
 
-If these parameters are stored somewhere else in your hdf file, you can set their locations at runtime using the 
---sample-x, --sample-y, --resolution --full-file-name options. 
-
-#. --sample-x '/your_hdf_path/to_sample_x_in_mm'
-#. --sample-y '/your_hdf_path/to_sample_y_in_mm'
-#. --resolution '/your_hdf_path/to_image_resolution_in_micron'
-#. --full-file-name '/your_hdf_path/to_the_full_file_name'
-
-
-By default, these are set to:
-
-#. --sample-x '/measurement/instrument/sample_motor_stack/setup/x'
-#. --sample-y '/measurement/instrument/sample_motor_stack/setup/y'
-#. --resolution '/measurement/instrument/detection_system/objective/resolution'
-#. --full-file-name '/measurement/sample/file/full_name'
-
-to meet the `dxfile <https://dxfile.readthedocs.io/en/latest/source/demo/doc.areadetector.html#xml>`_ definitions for 
-beamlines `2 BM <https://docs2bm.readthedocs.io/en/latest/>`_ , `7 BM <https://docs7bm.readthedocs.io/en/latest/>`_ 
-and `32 ID <https://docs32id.readthedocs.io/en/latest/>`_.
-
-Once the above are confirmed, you can validate the mosaic data set with:
-::
-
-    (tomocupy) tomo@tomo4 $ tile show --folder-name /data/2021-12/Duchkov/mosaic/
-    2022-02-16 11:33:38,485 - Started tile
-    2022-02-16 11:33:38,485 - Saving log at /home/beams/TOMO/logs/tile_2022-02-16_11_33_38.log
-    2022-02-16 11:33:38,485 - checking tile files ...
-    2022-02-16 11:33:38,487 - Checking directory: /data/2021-12/Duchkov/mosaic for a tile scan
-    2022-02-16 11:33:38,864 - tile file sorted
-    2022-02-16 11:33:38,865 - x0y0: x = -0.000100; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2073.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2073.h5
-    2022-02-16 11:33:38,865 - x1y0: x = 0.849900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2074.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2074.h5
-    2022-02-16 11:33:38,865 - x2y0: x = 1.699900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2075.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2075.h5
-    2022-02-16 11:33:38,865 - x3y0: x = 2.549900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2076.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2076.h5
-    2022-02-16 11:33:38,865 - x4y0: x = 3.399900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2077.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2077.h5
-    2022-02-16 11:33:39,035 - image   size (x, y) in pixels: (2448, 2048)
-    2022-02-16 11:33:39,035 - tile shift (x, y) in pixels: (2428, 0)
-    2022-02-16 11:33:39,035 - tile overlap (x, y) in pixels: (20, 2048)
-    2022-02-16 11:33:39,040 - tile file name grid:
-                                                 y_0                                          y_1                                          y_2                                          y_3                                          y_4
-    x_0  /data/2021-12/Duchkov/mosaic/mosaic_2073.h5  /data/2021-12/Duchkov/mosaic/mosaic_2074.h5  /data/2021-12/Duchkov/mosaic/mosaic_2075.h5  /data/2021-12/Duchkov/mosaic/mosaic_2076.h5  /data/2021-12/Duchkov/mosaic/mosaic_2077.h5
-
-2. Quick panoramic inspection (optional)
-=========================================
-
-Before running the time-consuming center search, use **tile panoramic** to quickly verify the tile layout and get a visual impression of the nominal overlap quality. It reads a single projection (at the angle set by ``--nprojection``, default 0.5 = midpoint) from each tile, normalizes it, and saves a wide stitched image to ``tile/panoramic.tif``:
-
-::
-
-    (tomocupy) tomo@tomo4 $ tile panoramic --flat-linear True
-
-Open the result in `Fiji ImageJ <https://imagej.net/software/fiji/>`_ to confirm:
-
-- All tiles are present and in the correct order.
-- The nominal overlap looks approximately correct (the seam regions may not be perfect yet — that is fine and expected).
-- The sample fills the expected field of view.
-
-Once you have determined the correct shifts (after running **tile shift**), you can regenerate the panoramic with the corrected positions:
-
-::
-
-    (tomocupy) tomo@tomo4 $ tile panoramic --flat-linear True --x-shifts "[0, 5430, 5419]"
-
-3. Find rotation center
-=======================
-
-**tile center** finds the rotation axis location of the stitched dataset. It stitches all horizontal tiles in the **top row** (y0) of the tile grid using the nominal overlap distance stored in the hdf file, then reconstructs a stack of trial slices over a search range around the specified rotation axis. The vertical sinogram row used is controlled by ``--nsino`` (default 0.5 = vertical center of the detector; adjustable from 0 top to 1 bottom). With ``--binning N``, ``2**N`` consecutive sinogram rows are averaged. The reconstruction is performed with the engine specified by ``--recon-engine`` (tomocupy or tomopy).
-
-.. warning::
-
-   The default value of ``--reverse-grid`` (True) assumes that moving the sample stage in the positive X direction moves the sample to the **left** in the image (as seen by the detector). This is the case at 2-BM after the detector upgrade. If you are using an older setup where positive X moves the sample to the **right**, pass ``--reverse-grid False`` explicitly.
-
-   The default value of ``--file-type`` is ``double_fov``, which is the standard mode at 2-BM. Pass ``--file-type standard`` for single field-of-view datasets.
-
-Use ``--flat-linear True`` when flat fields were collected at the beginning and end of the scan (e.g. 20+20): the first and second halves are averaged separately and linearly interpolated across all projection angles for more accurate normalization.
+    tile show --sample-x '/your/path/to/x' --sample-y '/your/path/to/y'
 
 .. note::
 
-   At this stage only the **center of the reconstructed image** is reliable. The outer regions (left and right "donuts") may look blurry because the nominal tile overlap from the hdf file is only approximate. Ignore the outer regions and focus on the center when selecting the rotation axis.
+   At 2-BM, flat fields are collected at the **end** of each scan with the sample moved to
+   ``SampleOutX``.  Because the HDF attribute is written ``OnFileClose``, the motor RBV at
+   that moment reflects the flat-field position rather than the scan position.  The correct
+   tile X positions are stored in ``/process/acquisition/flat_fields/sample/in_x`` and are
+   read automatically by tile.  If you collected data before this fix was in place, pass the
+   correct path explicitly::
 
-The recommended workflow is **two passes**: a coarse search to locate the approximate center, followed by a fine search to pin it down to sub-pixel accuracy.
+       tile show --sample-x /process/acquisition/flat_fields/sample/in_x
 
-**Pass 1 — coarse search** (wide step, large range):
-
-::
-
-    (tomocupy) tomo@tomo4 ~/conda/tile-decarlof $ tile center --recon-engine tomocupy --rotation-axis 400 --file-type double_fov --binning 2 --nsino-per-chunk 2 --flat-linear True
-    2026-03-24 15:18:38,306 - Started tile
-    2026-03-24 15:18:38,306 - Saving log at /home/beams/TOMO/logs/tile_2026-03-24_15_18_38.log
-    2026-03-24 15:18:38,306 - Run find rotation axis location
-    ...
-    2026-03-24 15:18:41,679 - image   size (x, y) in pixels: (6464, 4852)
-    2026-03-24 15:18:41,679 - stitch shift (x, y) in pixels: (5416, 4561)
-    2026-03-24 15:18:41,679 - tile overlap (x, y) in pixels: (1048, 291)
-    2026-03-24 15:18:48,953 - Created a temporary hdf file: /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile/tmp.h5
-    2026-03-24 15:18:48,954 - tomocupy recon --file-type double_fov --binning 2 --reconstruction-type try --file-name /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile/tmp.h5             --center-search-width 10.0 --rotation-axis-auto manual --rotation-axis 400.0             --center-search-step 0.5 --end-column -1 --nsino-per-chunk 2 --flat-linear True
-    2026-03-24 15:19:55,427 - Processing slice 0
-    queue size 000 |  |████████████████████████████████████████| 100.0%
-    2026-03-24 15:20:00,821 - Reconstruction time 1.2e+01s
-    2026-03-24 15:20:05,333 - Please open the stack of images from /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile_rec/try_center/tmp/recon* and select the rotation center
-
-Use `Fiji ImageJ <https://imagej.net/software/fiji/>`_  to load the reconstructed slice stack with File/Import/Image Sequence:
-
-.. image:: img/tile_center_00.png
-   :width: 720px
-   :alt: project
-
-
-Zoom into the center region of the image and move the slider:
-
-.. image:: img/tile_center_01.png
-   :width: 720px
-   :alt: project
-
-
-until the center of the image is sharp and free of artifacts:
-
-.. image:: img/tile_center_02.png
-   :width: 720px
-   :alt: project
-
-Note the rotation axis value shown in the top-left corner of the best image (656 in this example). Then re-run with a finer step centered on that value.
-
-**Pass 2 — fine search** (small step, narrow range):
-
-::
-
-    (tomocupy) tomo@tomo4 ~/conda/tile-decarlof $ tile center --recon-engine tomocupy --rotation-axis 656 --file-type double_fov --binning 2 --nsino-per-chunk 2 --flat-linear True --center-search-width 10 --center-search-step 1
-    2026-03-24 16:42:14,152 - Started tile
-    2026-03-24 16:42:14,152 - Saving log at /home/beams/TOMO/logs/tile_2026-03-24_16_42_14.log
-    2026-03-24 16:42:14,152 - Run find rotation axis location
-    ...
-    2026-03-24 16:42:17,524 - image   size (x, y) in pixels: (6464, 4852)
-    2026-03-24 16:42:17,525 - stitch shift (x, y) in pixels: (5416, 4561)
-    2026-03-24 16:42:17,525 - tile overlap (x, y) in pixels: (1048, 291)
-    2026-03-24 16:42:25,225 - Created a temporary hdf file: /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile/tmp.h5
-    2026-03-24 16:42:25,226 - tomocupy recon --file-type double_fov --binning 2 --reconstruction-type try --file-name /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile/tmp.h5             --center-search-width 10.0 --rotation-axis-auto manual --rotation-axis 656.0             --center-search-step 1.0 --end-column -1 --nsino-per-chunk 2 --flat-linear True
-    2026-03-24 16:43:31,516 - Processing slice 0
-    queue size 000 |  |████████████████████████████████████████| 100.0%
-    2026-03-24 16:43:36,281 - Reconstruction time 1.1e+01s
-    2026-03-24 16:43:40,757 - Please open the stack of images from /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data/tile_rec/try_center/tmp/recon* and select the rotation center
-
-Inspect the stack again and record the final rotation axis (650 in this example). Store this for the next step.
-
-4. Tile Shift
-=============
-
-**tile center** used the nominal tile overlap distance stored in the hdf file. In this step, **tile shift** fine-tunes each tile's horizontal position. It operates on the **top row (y0)** of the tile grid, using the same sinogram row as ``tile center`` (controlled by ``--nsino``).
-
-For each tile boundary (there are N-1 boundaries for N horizontal tiles), the tool reconstructs a stack of slices by sliding the overlap of the adjacent tile by ``--shift-search-width`` pixels in steps of ``--shift-search-step`` pixels on either side of the nominal position. The total number of shifts tried per boundary is ``2 * shift_search_width / shift_search_step`` (default: 40 shifts per boundary with ``--shift-search-width 20 --shift-search-step 1``).
-
-A progress bar is displayed during processing and, when complete, a color-coded index map is printed:
-
-- **green** indices correspond to negative offsets (tiles closer together than nominal)
-- **red** index corresponds to 0 px offset (perfect motor motion = nominal overlap)
-- **yellow** indices correspond to positive offsets (tiles farther apart than nominal)
-
-The user is then prompted to enter the index of the best-looking frame from the reconstructed stack (or stitched projections), repeating for each tile boundary. The prompt shows the **nominal index** (the one corresponding to 0 px correction), which is the correct answer if motor positioning was perfect.
-
-::
-
-    (tomocupy) tomo@tomo4 ~/conda/tile-decarlof $ tile shift --flat-linear True --rotation-axis 650
-    2026-03-25 15:29:12,127 - Started tile
-    2026-03-25 15:29:12,128 - Saving log at /home/beams/TOMO/logs/tile_2026-03-25_15_29_12.log
-    2026-03-25 15:29:12,128 - Run manual shift
-    2026-03-25 15:29:12,128 - checking tile files ...
-    2026-03-25 15:29:12,128 - Checking directory: /gdata/dm/2BM/2026-03/2026-03-Nikitin-0/data for a tile scan
-    2026-03-25 15:29:14,421 - tile file sorted
-    2026-03-25 15:29:14,422 - x0y0: x = 0.900000; y = -3.000000, file name = .../coffe_beam_mosaic_001.h5
-    2026-03-25 15:29:14,422 - x1y0: x = 2.800000; y = -3.000000, file name = .../coffe_beam_mosaic_002.h5
-    2026-03-25 15:29:14,422 - x2y0: x = 4.700000; y = -3.000000, file name = .../coffe_beam_mosaic_003.h5
-    ...
-    2026-03-25 15:29:15,577 - image   size (x, y) in pixels: (6464, 4852)
-    2026-03-25 15:29:15,577 - stitch shift (x, y) in pixels: (5416, 4561)
-    2026-03-25 15:29:15,577 - tile overlap (x, y) in pixels: (1048, 291)
-    Please enter rotation center (656.2): 650
-    2026-03-25 15:29:16,100 - Processing tile boundary 1 of 2
-      [████████████████████████████████████████] 80/80 (+39 px)
-    Index-to-pixel-offset map for tile 1: 0=-40px, 1=-39px, ... 40=+0px, ... 79=+39px
-    2026-03-25 15:47:00,123 - Please open the stack of images from reconstructions .../tile_rec/tmp_rec/recon* or stitched projections .../tile_rec/tmp_proj/p*, and select the file id to shift tile 1
-    Please enter id for tile 1 shift [nominal: 40] corresponding to 0 pixel shift from the nominal overlap of 1048 px stored in the raw data files:
-
-Use `Fiji ImageJ <https://imagej.net/software/fiji/>`_  to load the reconstructed slice or projection stack with File/Import/Image Sequence:
-
-.. image:: img/tile_shift_00.png
-   :width: 720px
-   :alt: project
-
-
-Zoom into the region of the image separating the two tiles and move the slider:
-
-.. image:: img/tile_shift_01.png
-   :width: 720px
-   :alt: project
-
-
-until the boundary region between the two tiles is sharp and free of artifacts:
-
-.. image:: img/tile_shift_02.png
-   :width: 720px
-   :alt: project
-
-The file name in Fiji's title bar (e.g. ``recon_00054.tif``) tells you the index to enter. In the example above that is index 54, which maps to +14 px from the index-to-pixel-offset map — meaning the stage was 14 pixels (≈ 9 µm at 0.65 µm/px resolution) further apart than the motor position stored in the hdf file.
-
-Pressing **Enter** without typing anything accepts the nominal index (0 px correction).
-
-::
-
-    Please enter id for tile 1 shift [nominal: 40] ...: 54
-    2026-03-25 15:47:02,348 - Selected offset for tile 1: +14 px from nominal (index 54)
-    2026-03-25 15:47:02,349 - Current shifts: [   0 5430 5416]
-
-**tile shift** will now repeat the same process, keeping all previously fixed tiles fixed and sliding the next tile boundary only.
-
-::
-
-    2026-03-25 15:47:02,350 - Processing tile boundary 2 of 2
-      [████████████████████████████████████████] 80/80 (+39 px)
-    Index-to-pixel-offset map for tile 2: 0=-40px, 1=-39px, ... 40=+0px, ... 79=+39px
-    2026-03-25 16:02:14,511 - Please open the stack of images from reconstructions .../tile_rec/tmp_rec/recon* ...
-    Please enter id for tile 2 shift [nominal: 40] corresponding to 0 pixel shift from the nominal overlap of 1048 px stored in the raw data files: 43
-    2026-03-25 16:02:20,812 - Selected offset for tile 2: +3 px from nominal (index 43)
-    2026-03-25 16:02:20,813 - Current shifts: [   0 5430 5419]
-    2026-03-25 16:02:20,814 - Center 650
-    2026-03-25 16:02:20,815 - Relative shifts [0, 5430, 5419]
-
-5. Tile Stitch
-==============
-
-At the end of **tile shift** step, we obtain the final shift list (e.g. ``[0, 5430, 5419]``) that we can use for the final tile stitching. **tile stitch** will generate a single hdf file merging all mosaic tiles with the correct overlap.
-
-::
-
-    (tomocupy) tomo@tomo4 $ tile stitch --folder-name /data/2021-12/Duchkov/mosaic --nproj-per-chunk 128 --x-shifts "[0, 2450, 2450, 2452, 2454]" 
-    2022-02-16 18:30:06,770 - Started tile
-    2022-02-16 18:30:06,770 - Saving log at /home/beams/TOMO/logs/tile_2022-02-16_18_30_06.log
-    2022-02-16 18:30:06,770 - Run stitching
-    2022-02-16 18:30:06,770 - checking tile files ...
-    2022-02-16 18:30:06,770 - Checking directory: /data/2021-12/Duchkov/mosaic for a tile scan
-    2022-02-16 18:30:07,146 - tile file sorted
-    2022-02-16 18:30:07,146 - x0y0: x = -0.000100; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2073.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2073.h5
-    2022-02-16 18:30:07,146 - x1y0: x = 0.849900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2074.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2074.h5
-    2022-02-16 18:30:07,146 - x2y0: x = 1.699900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2075.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2075.h5
-    2022-02-16 18:30:07,146 - x3y0: x = 2.549900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2076.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2076.h5
-    2022-02-16 18:30:07,146 - x4y0: x = 3.399900; y = 28.000000, file name = /data/2021-12/Duchkov/mosaic/mosaic_2077.h5, original file name = /local/data/2021-12/Duchkov/mosaic_2077.h5
-    2022-02-16 18:30:07,321 - Relative shifts [   0 2450 2450 2452 2454]
-    2022-02-16 18:30:07,323 - Stitching projections 0 - 128
-    2022-02-16 18:30:20,461 - Stitching projections 128 - 256
-    2022-02-16 18:30:32,099 - Stitching projections 256 - 384
-    2022-02-16 18:30:50,475 - Stitching projections 384 - 512
-    2022-02-16 18:31:12,040 - Stitching projections 512 - 640
-    2022-02-16 18:31:30,324 - Stitching projections 640 - 768
-    2022-02-16 18:31:49,881 - Stitching projections 768 - 896
-    2022-02-16 18:32:08,534 - Stitching projections 896 - 1024
-    2022-02-16 18:32:26,784 - Stitching projections 1024 - 1152
-    2022-02-16 18:32:47,320 - Stitching projections 1152 - 1280
-    2022-02-16 18:33:04,260 - Stitching projections 1280 - 1408
-    2022-02-16 18:33:23,326 - Stitching projections 1408 - 1536
-    2022-02-16 18:33:41,526 - Stitching projections 1536 - 1664
-    2022-02-16 18:34:00,341 - Stitching projections 1664 - 1792
-    2022-02-16 18:34:18,362 - Stitching projections 1792 - 1920
-    2022-02-16 18:34:37,191 - Stitching projections 1920 - 2048
-    2022-02-16 18:34:55,829 - Stitching projections 2048 - 2176
-    2022-02-16 18:35:15,554 - Stitching projections 2176 - 2304
-    2022-02-16 18:35:33,733 - Stitching projections 2304 - 2432
-    2022-02-16 18:35:58,429 - Stitching projections 2432 - 2560
-    2022-02-16 18:36:16,669 - Stitching projections 2560 - 2688
-    2022-02-16 18:36:37,403 - Stitching projections 2688 - 2816
-    2022-02-16 18:37:01,131 - Stitching projections 2816 - 2944
-    2022-02-16 18:37:21,374 - Stitching projections 2944 - 3072
-    2022-02-16 18:37:40,137 - Stitching projections 3072 - 3200
-    2022-02-16 18:37:55,265 - Stitching projections 3200 - 3328
-    2022-02-16 18:38:13,574 - Stitching projections 3328 - 3456
-    2022-02-16 18:38:35,979 - Stitching projections 3456 - 3584
-    2022-02-16 18:38:57,068 - Stitching projections 3584 - 3712
-    2022-02-16 18:39:16,547 - Stitching projections 3712 - 3840
-    2022-02-16 18:39:40,333 - Stitching projections 3840 - 3968
-    2022-02-16 18:40:01,126 - Stitching projections 3968 - 4096
-    2022-02-16 18:40:23,886 - Stitching projections 4096 - 4224
-    2022-02-16 18:40:44,862 - Stitching projections 4224 - 4352
-    2022-02-16 18:41:08,228 - Stitching projections 4352 - 4480
-    2022-02-16 18:41:30,260 - Stitching projections 4480 - 4608
-    2022-02-16 18:41:52,968 - Stitching projections 4608 - 4736
-    2022-02-16 18:42:14,439 - Stitching projections 4736 - 4864
-    2022-02-16 18:42:36,661 - Stitching projections 4864 - 4992
-    2022-02-16 18:42:58,154 - Stitching projections 4992 - 5120
-    2022-02-16 18:43:21,760 - Stitching projections 5120 - 5248
-    2022-02-16 18:43:43,310 - Stitching projections 5248 - 5376
-    2022-02-16 18:44:04,637 - Stitching projections 5376 - 5504
-    2022-02-16 18:44:22,942 - Stitching projections 5504 - 5632
-    2022-02-16 18:44:45,562 - Stitching projections 5632 - 5760
-    2022-02-16 18:45:03,388 - Stitching projections 5760 - 5888
-    2022-02-16 18:45:23,980 - Stitching projections 5888 - 6000
-    2022-02-16 18:55:02,606 - Output file /data/2021-12/Duchkov/mosaic/tile/tile.h5
-    2022-02-16 19:03:41,109 - Reconstruct /data/2021-12/Duchkov/mosaic/tile/tile.h5 with tomocupy:
-    2022-02-16 19:03:41,110 - tomocupy recon --file-name /data/2021-12/Duchkov/mosaic/tile/tile.h5 --rotation-axis 1246 --reconstruction-type full --file-type double_fov --remove-stripe-method fw --binning 0 --nsino-per-chunk 8 --rotation-axis-auto manual
-    2022-02-16 19:03:41,110 - Reconstruct /data/2021-12/Duchkov/mosaic/tile/tile.h5 with tomopy:
-    2022-02-16 19:03:41,110 - tomopy recon --file-name /data/2021-12/Duchkov/mosaic/tile/tile.h5 --rotation-axis 1246 --reconstruction-type full --file-type double_fov --remove-stripe-method fw --binning 0 --nsino-per-chunk 8 --rotation-axis-auto manual
-
-6. Tile reconstruction
-======================
-
-Once the stitching is completed the tomographic reconstruction can be done with `tomocupy <https://tomocupy.readthedocs.io/en/latest/>`_ or `tomopy <https://tomopy.readthedocs.io/en/latest/>`_/`tomopycli <https://tomopycli.readthedocs.io/en/latest/>`_:
-
-with **tomocupy**
-::
- 
-    (tomocupy) tomo@tomo4 $ tomocupy recon --file-name /data/2021-12/Duchkov/mosaic/tile/tile.h5 --rotation-axis 1246 --reconstruction-type full --file-type double_fov --remove-stripe-method fw --binning 0 --nsino-per-chunk 8 --rotation-axis-auto manual
-
-with **tomopy**
-::
- 
-    (tomocupy) tomo@tomo4 $ tomopy recon --file-name /data/2021-12/Duchkov/mosaic/tile/tile.h5 --rotation-axis 1246 --reconstruction-type full --file-type double_fov --remove-stripe-method fw --binning 0 --nsino-per-chunk 8 --rotation-axis-auto manual
-
-For more options:
-::
-
-    (tomocupy) tomo@tomo4 $ tile -h
-    (tomocupy) tomo@tomo4 $ tile stitch -h
-    (tomocupy) tomo@tomo4 $ tile shift -h
-
-
-Quick Start Guide
-=================
-
-This section summarizes the full mosaic reconstruction workflow in plain language for new users.
-
-**What you have:** a set of hdf5 files, each containing a tomographic scan of one tile of the sample. The tiles overlap slightly and together cover a field of view larger than a single scan.
-
-**What you want:** a single reconstructed 3D volume of the full sample.
-
-The process has six steps (step 2 is optional):
 
 ----
 
 Step 1 — Verify the dataset (``tile show``)
---------------------------------------------
+===========================================
 
-**What it does:**
+Read the HDF metadata from every tile file, sort them by motor position, and print the tile
+grid layout, image size, and nominal overlap::
 
-Reads the hdf metadata from all tile files, sorts them by motor position, and prints the tile grid layout, image size, and nominal overlap. Use this to confirm all tiles are present and correctly ordered before doing anything else.
+    (tile) tomo@tomo4 $ tile show --folder-name /data/2021-12/Duchkov/mosaic/
+    2022-02-16 11:33:38,485 - Started tile
+    2022-02-16 11:33:38,485 - Saving log at /home/beams/TOMO/logs/tile_2022-02-16_11_33_38.log
+    2022-02-16 11:33:38,485 - checking tile files ...
+    2022-02-16 11:33:38,485 - Checking directory: /data/2021-12/Duchkov/mosaic for a tile scan
+    2022-02-16 11:33:38,780 - tile file sorted
+    2022-02-16 11:33:38,780 - x0y0: x = -0.0001; y = 28.0, file name = .../mosaic_2073.h5
+    2022-02-16 11:33:38,780 - x1y0: x =  0.8499; y = 28.0, file name = .../mosaic_2074.h5
+    ...
+    2022-02-16 11:33:38,918 - image   size (x, y) in pixels: (2448, 2048)
+    2022-02-16 11:33:38,918 - tile shift (x, y) in pixels: (2428, 0)
+    2022-02-16 11:33:38,918 - tile overlap (x, y) in pixels: (20, 2048)
+    2022-02-16 11:33:38,918 - tile file name grid:
+                                              y_0
+    x_0  /data/2021-12/Duchkov/mosaic/mosaic_2073.h5
+    x_1  /data/2021-12/Duchkov/mosaic/mosaic_2074.h5
+    ...
 
-::
+Check that:
 
-    (tomocupy) tomo@tomo4 $ tile show --folder-name /path/to/data
+- All expected tiles are present and in the correct row/column positions.
+- The nominal overlap (``tile overlap``) is a reasonable fraction of the tile width
+  (typically 5–20%).
+
+.. warning::
+
+   ``--reverse-grid True`` (the default at 2-BM) reverses the tile order within each row,
+   so that tile x0 is placed at the left of the stitched image.  This matches the 2-BM
+   detector geometry where positive motor X moves the sample to the **left** in the image.
+   Pass ``--reverse-grid False`` if positive X moves the sample to the **right**.
+
 
 ----
 
-Step 2 — Quick panoramic inspection (optional, ``tile panoramic``)
-------------------------------------------------------------------
+Step 2 — Bin raw files (``tile bin``) — *optional*
+===================================================
 
-**What it does:**
+For large datasets (e.g. 6000 projections × 4852 × 6464 px per tile) it is practical to work
+on a spatially-binned copy during the alignment steps (center search, shift tuning).  Once the
+parameters are confirmed on the binned data the final stitch can be done at full resolution.
 
-Reads a single projection from each tile, normalizes it, and saves a wide stitched image to ``tile/panoramic.tif`` using the nominal overlap from the hdf file (or ``--x-shifts`` if provided). Open the result in Fiji to visually confirm the tile layout and get a sense of the overlap quality before running the longer center search.
+``tile bin`` copies all ``.h5`` files from ``--folder-name``, applies ``2**binning × 2**binning``
+spatial binning to the exchange datasets, and optionally subsamples every ``--bin-step``\th
+projection.  Output files are written to ``<folder-name>/bin<N>x<N>/`` by default::
 
-::
+    (tile) tomo@tomo4 $ tile bin --folder-name /data/raw/ --binning 1 --bin-step 2
+    # → outputs to /data/raw/bin2x2/  (2×2 spatial bin, every 2nd projection)
 
-    (tomocupy) tomo@tomo4 $ tile panoramic --flat-linear True
+    (tile) tomo@tomo4 $ tile bin --folder-name /data/raw/ --binning 2 --bin-step 1
+    # → outputs to /data/raw/bin4x4/  (4×4 spatial bin, all projections)
+
+For a multi-row mosaic where each row lives in a separate subfolder, run ``tile bin`` once per
+row folder::
+
+    for ydir in y0 y1 y2 y3; do
+        tile bin --folder-name /data/raw/$ydir/ --binning 1 --bin-step 2
+    done
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--binning N``
+     - Spatial bin factor = 2\ :sup:`N` (0=none, 1=2×2, 2=4×4, …)
+   * - ``--bin-step N``
+     - Keep every Nth projection (1 = keep all)
+   * - ``--bin-output-dir PATH``
+     - Override the default output directory
+
 
 ----
 
-Step 3 — Find the rotation center (``tile center``)
-----------------------------------------------------
+Step 3 — Collect flat field basis (``tile dump-flats``) — *optional*
+=====================================================================
 
-**What it does:**
+``tile dump-flats`` collects flat fields from all tile HDF5 files and saves them as a basis
+file for per-projection NNLS flat correction.  For each input file it writes two averaged
+frames: the mean of the first half and the mean of the second half of the flat field frames.
+This basis is then passed to subsequent commands via ``--flats-file``.
 
-Takes all horizontal tiles from the top row of the mosaic, stitches them side by side using the nominal overlap stored in the hdf file, and reconstructs a stack of trial images — each one using a slightly different rotation axis position. You inspect the stack and pick the sharpest image.
+Use this when:
+
+- Flat field illumination varies significantly across the scan (beam intensity drift, ring
+  artifacts from a specific flat, etc.).
+- You want per-projection flat correction rather than a simple averaged flat.
+
+For a single-folder dataset::
+
+    (tile) tomo@tomo4 $ tile dump-flats --folder-name /data/raw/bin2x2/ \
+                                        --dump-flats-output flats.h5
+    # → writes /data/raw/bin2x2/flats.h5
+
+For a multi-row dataset where each row lives in a subfolder::
+
+    (tile) tomo@tomo4 $ tile dump-flats --folder-name /data/raw/bin2x2/ \
+                                        --y-folders y0,y1,y2,y3 \
+                                        --dump-flats-output flats.h5
+    # → collects flats from y0/, y1/, y2/, y3/  and writes /data/raw/bin2x2/flats.h5
+
+The resulting ``flats.h5`` is passed to ``tile center``, ``tile shift``, and ``tile stitch``
+via the ``--flats-file`` option.
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--y-folders``
+     - Comma-separated subfolder names (e.g. ``y0,y1,y2,y3``).  Leave empty to use
+       ``--folder-name`` directly.
+   * - ``--dump-flats-output``
+     - Output filename inside ``--folder-name`` (default: ``flats.h5``)
+   * - ``--reverse-step``
+     - Flip the X direction when reading flats (``True``/``False``, default ``False``)
+
+
+----
+
+Step 4 — Quick panoramic inspection (``tile panoramic``) — *optional*
+======================================================================
+
+Before running the time-consuming center search, use ``tile panoramic`` to visually confirm
+the tile layout.  It reads a single projection (at the angle set by ``--nprojection``, default
+0.5 = midpoint) from each tile, normalises it, and saves a wide stitched image to
+``tile/panoramic.tif`` in the dataset folder::
+
+    (tile) tomo@tomo4 $ tile panoramic --flat-linear True
+
+Open the result in `Fiji ImageJ <https://imagej.net/software/fiji/>`_ to confirm:
+
+- All tiles are present and in the correct left-to-right order.
+- The nominal overlap looks approximately correct (seam regions may not be perfect yet).
+- The sample fills the expected field of view.
+
+Once you have the correct shifts from ``tile shift``, you can regenerate the panoramic with
+the corrected positions to verify the alignment::
+
+    (tile) tomo@tomo4 $ tile panoramic --flat-linear True --x-shifts "[0, 5430, 5419]"
+
+Pass ``--show`` to display the image interactively in a matplotlib window (requires a display).
+
+
+----
+
+Step 5 — Find the rotation center (``tile center``)
+====================================================
+
+``tile center`` stitches all horizontal tiles in the **top row** of the mosaic using the
+nominal overlap from the HDF file, then reconstructs a stack of trial slices, each with a
+slightly different rotation axis position.  You inspect the stack and pick the sharpest image.
+
+The sinogram row used is controlled by ``--nsino`` (0 = top, 1 = bottom, default 0.5 =
+vertical centre of the detector).  With ``--binning N``, ``2**N`` consecutive rows are
+averaged to improve signal.
+
+.. warning::
+
+   Only the **centre of the reconstructed image** is reliable at this stage.  The outer
+   regions may look blurry because the nominal tile overlap is only approximate.  Ignore
+   those regions and focus on the centre when selecting the rotation axis.
+
+.. warning::
+
+   ``--file-type double_fov`` (the default) tells tomocupy to treat the input as a 360°
+   scan and mirror the sinogram.  This is the standard mode at 2-BM for 360° acquisitions.
+   Pass ``--file-type standard`` for ordinary 180° scans.
+
+**Recommended workflow — two passes:**
+
+*Pass 1 — coarse search* (wide step, large range)::
+
+    (tile) tomo@tomo4 $ tile center --recon-engine tomocupy \
+        --rotation-axis 400 --center-search-width 200 --center-search-step 10 \
+        --file-type double_fov --binning 2 --nsino-per-chunk 2 --flat-linear True
+
+Open the try-center stack from::
+
+    /path/to/data/tile_rec/try_center/tmp/recon*
+
+in Fiji (File → Import → Image Sequence).  Zoom into the **centre** of the image and move the
+slider until the reconstruction looks sharp and ring-free.  Note the rotation axis value shown
+in the top-left corner of the best image.
+
+*Pass 2 — fine search* (small step, narrow range)::
+
+    (tile) tomo@tomo4 $ tile center --recon-engine tomocupy \
+        --rotation-axis 656 --center-search-width 10 --center-search-step 1 \
+        --file-type double_fov --binning 2 --nsino-per-chunk 2 --flat-linear True
+
+Record the final rotation axis value (e.g. 650) for the next step.
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--rotation-axis``
+     - Starting guess for the rotation axis (pixels).  Use -1 to default to image centre.
+   * - ``--center-search-width``
+     - Half-width of the search range (pixels).
+   * - ``--center-search-step``
+     - Step size between trials (pixels).
+   * - ``--nsino``
+     - Relative vertical position of the sinogram row (0–1).
+   * - ``--binning``
+     - Spatial binning (0=none, 1=2×, 2=4×).
+   * - ``--nsino-per-chunk``
+     - Number of sinogram rows averaged per chunk (increase for better SNR).
+   * - ``--flat-linear True``
+     - Enable linear interpolation of flat fields across the scan.
+   * - ``--flats-file PATH``
+     - Use per-projection NNLS flat correction from a ``dump-flats`` basis file.
+   * - ``--file-type``
+     - ``double_fov`` (default, 360° scans) or ``standard`` (180° scans).
+   * - ``--recon-engine``
+     - ``tomocupy`` (default) or ``tomopy``.
+
+
+----
+
+Step 6 — Fine-tune tile shifts (``tile shift``)
+================================================
+
+``tile center`` used the nominal overlap stored in the HDF file.  ``tile shift`` refines each
+horizontal tile position one boundary at a time, keeping all previously fixed tiles fixed and
+sliding only the next tile.
+
+For each boundary between adjacent tiles, it reconstructs a stack of slices by shifting the
+overlap by ``--shift-search-width`` pixels in steps of ``--shift-search-step`` on either side
+of the nominal position.  A colour-coded index map is printed:
+
+- **green** = negative offset (tiles closer than nominal)
+- **red** = 0 offset (perfect motor positioning = nominal overlap)
+- **yellow** = positive offset (tiles farther than nominal)
+
+::
+
+    (tile) tomo@tomo4 $ tile shift --rotation-axis 650 --flat-linear True \
+        --shift-search-width 60 --shift-search-step 1
+    ...
+    Please enter rotation center (656.2): 650
+    ...
+    Please enter id for tile 1 shift [nominal: 60] ...: 74
+    2026-03-25 15:47:02,348 - Selected offset for tile 1: +14 px (index 74)
+    2026-03-25 15:47:02,349 - Current shifts: [0 5430 5416]
+    ...
+    Please enter id for tile 2 shift [nominal: 60] ...: 63
+    2026-03-25 16:02:20,813 - Selected offset for tile 2: +3 px (index 63)
+    2026-03-25 16:02:20,813 - Current shifts: [0 5430 5419]
+    2026-03-25 16:02:20,814 - Center 650
+    2026-03-25 16:02:20,815 - Relative shifts [0, 5430, 5419]
+
+Inspect the try-recon stack or the stitched projection stack in Fiji.  Zoom into the **boundary
+region** between the two tiles and move the slider until the seam is sharp and artifact-free.
+The file name in Fiji's title bar gives the index to enter (pressing Enter accepts the nominal).
+
+Record the final shift list (e.g. ``[0, 5430, 5419]``) for the next step.
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--rotation-axis``
+     - Rotation axis found in Step 5.
+   * - ``--shift-search-width``
+     - Half-width of the shift search in pixels (default 20).
+   * - ``--shift-search-step``
+     - Step size between shift trials in pixels (default 1).
+   * - ``--flat-linear True``
+     - As in Step 5.
+   * - ``--x-shifts``
+     - Provide pre-computed shifts to skip the interactive search (e.g. from a previous run).
+
+
+----
+
+Step 7 — Horizontal stitch (``tile stitch``)
+=============================================
+
+``tile stitch`` merges all tiles for each y-row into a single HDF5 file (``tile.h5``) using
+the confirmed x-shifts.  The output file has flat/dark correction already applied
+(``data_white=1``, ``data_dark=0``) so that subsequent steps (vstitch, double-fov,
+reconstruction) do not need to repeat it.
+
+For a **single-row** mosaic::
+
+    (tile) tomo@tomo4 $ tile stitch --folder-name /data/mosaic/ \
+        --x-shifts "[0, 2450, 2450, 2452, 2454]" \
+        --rotation-axis 1246 --flat-linear True
+
+For a **multi-row** mosaic, run ``tile stitch`` once per y-row::
+
+    for k in 0 1 2 3; do
+        tile stitch --folder-name /data/bin2x2/y$k/ \
+            --x-shifts "[0, 2752, 2752]" \
+            --rotation-axis 324 --flat-linear True \
+            --flats-file /data/bin2x2/flats.h5 --zinger-level 0.08
+    done
+
+Each run writes ``<folder-name>/tile/tile.h5``.
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--x-shifts``
+     - Cumulative pixel shifts from Step 6, e.g. ``"[0, 5430, 5419]"``.  Required.
+   * - ``--rotation-axis``
+     - Rotation axis from Step 5 (used when ``--recon True``).
+   * - ``--flat-linear True``
+     - Linear flat-field interpolation per projection.
+   * - ``--flats-file PATH``
+     - Per-projection NNLS flat correction (from ``tile dump-flats``).
+   * - ``--zinger-level``
+     - Zinger removal threshold as fraction above local temporal median (0 = disabled,
+       0.08 = 8%).  A value of 0 disables zinger removal.
+   * - ``--nproj-per-chunk``
+     - Projections processed per chunk (increase for faster I/O, at the cost of memory).
+   * - ``--max-workers``
+     - Number of parallel threads for chunk processing.
+   * - ``--start-proj / --end-proj``
+     - Process only a subset of projections (useful for splitting a large job).
+   * - ``--recon True/False``
+     - Whether to also run a quick reconstruction after stitching (default True).
+
+
+----
+
+Step 8 — Vertical stitch (``tile vstitch``) — *multi-row only*
+===============================================================
+
+For a mosaic with multiple y-rows, ``tile vstitch`` stacks the per-row ``tile.h5`` files
+vertically into a single ``vstitch.h5``.  It uses quintic blending in the overlap region and
+applies per-projection intensity scale calibration between adjacent rows to smooth brightness
+differences.
+
+Determine the y-shifts between rows (in pixels) by inspecting a single projection from each
+row's ``tile.h5`` and measuring the vertical overlap::
+
+    (tile) tomo@tomo4 $ tile vstitch \
+        --folder-name /data/bin2x2/ \
+        --y-folders y0,y1,y2,y3 \
+        --y-shifts "[0, 450, 450, 450]" \
+        --vstitch-output vstitch.h5
+
+Alternatively, pass an explicit glob pattern::
+
+    (tile) tomo@tomo4 $ tile vstitch \
+        --folder-name /data/bin2x2/ \
+        --vstitch-pattern "/data/bin2x2/y*/tile/tile.h5" \
+        --y-shifts "[0, 450, 450, 450]"
+
+Output: ``<folder-name>/vstitch.h5`` (or as set by ``--vstitch-output``).
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--y-shifts``
+     - Cumulative y-shifts between rows in pixels, e.g. ``"[0, 450, 450, 450]"``.  Required.
+   * - ``--y-folders``
+     - Comma-separated subfolder names (e.g. ``y0,y1,y2,y3``).
+   * - ``--vstitch-pattern``
+     - Explicit glob pattern overriding ``--y-folders`` (e.g. ``y*/tile/tile.h5``).
+   * - ``--vstitch-output``
+     - Output filename relative to ``--folder-name`` (default ``vstitch.h5``).
+   * - ``--nproj-per-chunk``
+     - Projections processed per chunk.
+   * - ``--max-workers``
+     - Number of parallel threads.
+
+
+----
+
+Step 9 — 360° to 180° conversion (``tile double-fov``) — *360° scans only*
+===========================================================================
+
+For 360° acquisitions, ``tile double-fov`` converts the dataset to an effective 180° scan
+by stitching projection ``i`` with ``fliplr(projection[i + N/2])``.  The rotation axis position
+controls the amount of overlap/shift between the two halves.
+
+The output is a half-sized projection stack (N/2 projections × full stitched width) ready
+for standard 180° reconstruction::
+
+    (tile) tomo@tomo4 $ tile double-fov \
+        --folder-name /data/bin2x2/ \
+        --double-fov-input vstitch.h5 \
+        --double-fov-output double_fov.h5 \
+        --rotation-axis 1627
+
+Key parameters:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - ``--rotation-axis``
+     - Rotation axis position in the input file (pixels from left edge).  Required.
+   * - ``--double-fov-input``
+     - Input HDF5 file (relative to ``--folder-name`` or absolute, default ``vstitch.h5``).
+   * - ``--double-fov-output``
+     - Output HDF5 file (default ``double_fov.h5``).
+   * - ``--nproj-per-chunk``
+     - Projections processed per chunk.
+   * - ``--max-workers``
+     - Number of parallel threads.
+
+
+----
+
+Step 10 — Reconstruction
+=========================
+
+Once the final stitched file is ready, reconstruct with
+`tomocupy <https://tomocupy.readthedocs.io/en/latest/>`_ or
+`tomopy <https://tomopy.readthedocs.io/en/latest/>`_/`tomopycli <https://tomopycli.readthedocs.io/en/latest/>`_.
+
+**Single-row mosaic** (``tile/tile.h5``, 180° scan)::
+
+    (tomocupy) tomo@tomo4 $ tomocupy recon \
+        --file-name /data/mosaic/tile/tile.h5 \
+        --rotation-axis 1246 \
+        --reconstruction-type full \
+        --file-type standard \
+        --binning 0 --nsino-per-chunk 8 \
+        --rotation-axis-auto manual
+
+**Multi-row 360° mosaic** (``double_fov.h5``, already converted to 180°)::
+
+    (tomocupy) tomo@tomo4 $ tomocupy recon \
+        --file-name /data/bin2x2/double_fov.h5 \
+        --rotation-axis 1627 \
+        --reconstruction-type full \
+        --file-type standard \
+        --binning 0 --nsino-per-chunk 8 \
+        --rotation-axis-auto manual
 
 .. note::
 
-   Only the **center of the reconstructed image** is reliable at this stage. The outer regions (left and right "donuts") may look blurry because the nominal tile overlap from the hdf file is only approximate. Ignore the outer regions for now and focus on the center.
+   After ``tile double-fov`` the file is already a 180° dataset, so pass
+   ``--file-type standard``.  Use ``--file-type double_fov`` only if you are passing the
+   raw stitched ``tile.h5`` directly to tomocupy without the explicit double-fov conversion.
 
-**How to run (two passes recommended):**
+For all options::
 
-*Pass 1 — coarse:* start with a large search range to find the approximate center::
+    (tile) tomo@tomo4 $ tile -h
+    (tile) tomo@tomo4 $ tile stitch -h
+    (tile) tomo@tomo4 $ tile vstitch -h
+    (tile) tomo@tomo4 $ tile double-fov -h
 
-    (tomocupy) tomo@tomo4 $ tile center --recon-engine tomocupy --file-type double_fov \
-        --binning 2 --nsino-per-chunk 2 --flat-linear True \
-        --rotation-axis 400 --center-search-width 100 --center-search-step 5
-
-Open the output stack in Fiji (File → Import → Image Sequence), zoom into the **center of the image**, and move the slider until the center region is sharp. Note the rotation axis value shown in the top-left corner of the best image (e.g. 656).
-
-*Pass 2 — fine:* narrow the search around the value you found::
-
-    (tomocupy) tomo@tomo4 $ tile center --recon-engine tomocupy --file-type double_fov \
-        --binning 2 --nsino-per-chunk 2 --flat-linear True \
-        --rotation-axis 656 --center-search-width 5 --center-search-step 0.1
-
-Repeat the Fiji inspection and record the final value (e.g. **656.2**). This is your rotation center.
 
 ----
 
-Step 4 — Fine-tune the tile overlap positions (``tile shift``)
----------------------------------------------------------------
+Complete workflow example — 4×3 mosaic, 360° scan
+==================================================
 
-**What it does:**
-
-The nominal overlap from the hdf file is only approximate (limited by stage positioning accuracy, typically a few micrometers). This step fine-tunes the horizontal position of each tile relative to its neighbor so that the full stitched image — including the outer "donut" regions — is sharp.
-
-It works tile by tile, left to right. For each tile boundary it tries sliding the adjacent tile by ±20 pixels (adjustable) from the nominal position and reconstructs a stack for you to inspect. You pick the frame where the **boundary region between the two tiles** looks sharpest and seamless.
-
-**How to run:**
+This example follows the processing of a 4-row × 3-column coffee bean mosaic collected at
+2-BM in March 2026.  Each row lives in a separate subfolder ``y0``–``y3`` under the data
+directory and the scan is a 360° acquisition.
 
 ::
 
-    (tomocupy) tomo@tomo4 $ tile shift --flat-linear True --rotation-axis 656.2
+    DATA=/data/raw                  # raw files in DATA/y0/, DATA/y1/, DATA/y2/, DATA/y3/
+    BIN=/data/bin2x2                # working directory (2×2 binned, every 2nd projection)
 
-When prompted, confirm or update the rotation center. For each tile boundary the tool:
+    # 1. Verify the dataset (use any y-row)
+    tile show --folder-name $DATA/y0/
 
-1. Runs the reconstruction for all candidate shifts (progress bar displayed).
-2. Prints a color-coded index map: **green** = negative offset, **red** = nominal (0 px), **yellow** = positive offset.
-3. Asks you to enter an index.
+    # 2. Bin all rows
+    for k in 0 1 2 3; do
+        tile bin --folder-name $DATA/y$k/ --binning 1 --bin-step 2
+    done
 
-Then:
+    # 3. Collect flat field basis
+    tile dump-flats --folder-name $BIN --y-folders y0,y1,y2,y3 \
+        --dump-flats-output flats.h5
 
-1. Open the reconstruction stack ``tile_rec/tmp_rec/recon*`` **or** the projection stack ``tile_rec/tmp_proj/p*`` in Fiji.
-2. Zoom into the **overlap region between the two tiles** (not the center of the image).
-3. Move the slider until the boundary is sharp and artifact-free.
-4. Read the index from the file name shown by Fiji (e.g. ``recon_00054.tif`` → index 54) and enter it at the prompt.
+    # 4. Quick panoramic (top row only)
+    tile panoramic --folder-name $BIN/y0/ --flat-linear True
 
-.. note::
+    # 5. Find rotation center (coarse)
+    tile center --folder-name $BIN/y0/ --recon-engine tomocupy \
+        --rotation-axis 400 --center-search-width 200 --center-search-step 10 \
+        --file-type double_fov --binning 0 --nsino-per-chunk 2 --flat-linear True
+    # → open $BIN/y0/tile_rec/try_center/tmp/recon* in Fiji, pick best frame → e.g. 324
 
-   The prompt shows ``[nominal: 40]`` (or whichever index corresponds to 0 px offset). Pressing **Enter** without typing accepts the nominal, which is correct when stage positioning is perfect. A selection of 54 where nominal is 40 means the stage was +14 px (≈ 9 µm at 0.65 µm/px) farther apart than the hdf file recorded.
+    # 5b. Fine search
+    tile center --folder-name $BIN/y0/ --recon-engine tomocupy \
+        --rotation-axis 324 --center-search-width 10 --center-search-step 1 \
+        --file-type double_fov --binning 0 --nsino-per-chunk 2 --flat-linear True
+    # → confirmed rotation axis = 324
 
-Repeat for each tile boundary. At the end the tool prints the final shift array, e.g.::
+    # 6. Find tile shifts
+    tile shift --folder-name $BIN/y0/ --rotation-axis 324 --flat-linear True \
+        --shift-search-width 60 --shift-search-step 1
+    # → confirmed x-shifts = [0, 2752, 2752]
 
-    Current shifts: [0, 5430, 5419]
+    # 7. Stitch all rows
+    for k in 0 1 2 3; do
+        tile stitch --folder-name $BIN/y$k/ \
+            --x-shifts "[0, 2752, 2752]" \
+            --rotation-axis 324 --flat-linear True \
+            --flats-file $BIN/flats.h5 --zinger-level 0.08
+    done
+    # → $BIN/y*/tile/tile.h5
 
-Save this for the next step.
+    # 8. Vertical stitch
+    tile vstitch --folder-name $BIN \
+        --y-folders y0,y1,y2,y3 \
+        --y-shifts "[0, 450, 450, 450]" \
+        --vstitch-output vstitch.h5
+    # → $BIN/vstitch.h5
 
-----
+    # 9. 360° → 180° conversion
+    tile double-fov --folder-name $BIN \
+        --double-fov-input vstitch.h5 \
+        --double-fov-output double_fov.h5 \
+        --rotation-axis 1627
+    # → $BIN/double_fov.h5
 
-Step 5 — Stitch all tiles into a single file (``tile stitch``)
----------------------------------------------------------------
-
-**What it does:**
-
-Uses the corrected overlap positions from Step 2 to merge all mosaic tiles (all rows, all projections) into a single hdf5 file ready for reconstruction.
-
-**How to run:**
-
-::
-
-    (tomocupy) tomo@tomo4 $ tile stitch --x-shifts "[0, 5418, 5420]" --nproj-per-chunk 128
-
-The output file is written to ``tile/tile.h5`` inside your data folder.
-
-----
-
-Step 6 — Reconstruct (``tomocupy`` or ``tomopy``)
---------------------------------------------------
-
-**What it does:**
-
-Runs the full tomographic reconstruction on the stitched file.
-
-**How to run:**
-
-::
-
-    (tomocupy) tomo@tomo4 $ tomocupy recon --file-name /path/to/tile/tile.h5 \
-        --rotation-axis 656.2 --reconstruction-type full \
-        --file-type double_fov --flat-linear True \
-        --remove-stripe-method fw --binning 0 \
-        --nsino-per-chunk 4 --rotation-axis-auto manual
+    # 10. Reconstruct
+    tomocupy recon \
+        --file-name $BIN/double_fov.h5 \
+        --rotation-axis 1627 \
+        --reconstruction-type full \
+        --file-type standard \
+        --binning 0 --nsino-per-chunk 8 \
+        --rotation-axis-auto manual

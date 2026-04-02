@@ -229,14 +229,68 @@ SECTIONS['shift'] = {
         'help': "+/- center search step (pixel). "},
     }
 
-INFO_PARAMS      = ('file-io',)
-CENTER_PARAMS    = ('file-io', 'center')
-SHIFT_PARAMS     = ('file-io', 'center', 'shift')
-STITCH_PARAMS    = ('file-io', 'center', 'stitch')
-PANORAMIC_PARAMS = ('file-io', 'center', 'stitch')
-ALL_PARAMS    = ('file-io', 'center', 'shift', 'stitch')
+SECTIONS['bin'] = {
+    'bin-step': {
+        'default': 1,
+        'type': int,
+        'help': "Projection subsampling step (keep every Nth projection). 1 = keep all."},
+    'bin-output-dir': {
+        'default': '',
+        'type': str,
+        'help': "Output directory for binned files. Default: <folder-name>/bin<N>x<N>/ derived from --binning."},
+}
 
-NICE_NAMES = ('General', 'File IO', 'Center', 'Shift', 'Stitch')
+SECTIONS['dump-flats'] = {
+    'dump-flats-output': {
+        'default': 'flats.h5',
+        'type': str,
+        'help': "Output file name for the flat field basis (written inside --folder-name)."},
+    'y-folders': {
+        'default': '',
+        'type': str,
+        'help': "Comma-separated list of y-row subfolders inside --folder-name (e.g. 'y0,y1,y2,y3'). "
+                "Empty = use --folder-name directly."},
+}
+
+SECTIONS['vstitch'] = {
+    'y-shifts': {
+        'default': 'None',
+        'type': str,
+        'help': "Comma-separated cumulative y shifts between tile rows, e.g. '[0,450,450]'. Required."},
+    'vstitch-output': {
+        'default': 'vstitch.h5',
+        'type': str,
+        'help': "Output file name for the vertically stitched dataset (written inside --folder-name)."},
+    'vstitch-pattern': {
+        'default': '',
+        'type': str,
+        'help': "Glob pattern for input tile.h5 files. "
+                "Default (empty): <folder-name>/<y-folders>/tile/tile.h5 or <folder-name>/tile/tile.h5."},
+}
+
+SECTIONS['double-fov'] = {
+    'double-fov-input': {
+        'default': 'vstitch.h5',
+        'type': str,
+        'help': "Input HDF5 file for 360→180 conversion (relative to --folder-name or absolute)."},
+    'double-fov-output': {
+        'default': 'double_fov.h5',
+        'type': str,
+        'help': "Output HDF5 file after 360→180 conversion (relative to --folder-name or absolute)."},
+}
+
+INFO_PARAMS        = ('file-io',)
+CENTER_PARAMS      = ('file-io', 'center')
+SHIFT_PARAMS       = ('file-io', 'center', 'shift')
+STITCH_PARAMS      = ('file-io', 'center', 'stitch')
+PANORAMIC_PARAMS   = ('file-io', 'center', 'stitch')
+BIN_PARAMS         = ('file-io', 'bin')
+DUMP_FLATS_PARAMS  = ('file-io', 'dump-flats')
+VSTITCH_PARAMS     = ('file-io', 'vstitch')
+DOUBLE_FOV_PARAMS  = ('file-io', 'center', 'double-fov')
+ALL_PARAMS         = ('file-io', 'center', 'shift', 'stitch', 'bin', 'dump-flats', 'vstitch', 'double-fov')
+
+NICE_NAMES = ('General', 'File IO', 'Center', 'Shift', 'Stitch', 'Bin', 'Dump Flats', 'VStitch', 'Double FOV')
 
 def get_config_name():
     """Get the command line --config option."""
