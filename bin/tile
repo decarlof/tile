@@ -48,22 +48,27 @@ def run_shift(args):
 def run_stitch(args):
     stitch.stitching(args)
 
-def main():   
+def run_panoramic(args):
+    shift.panoramic(args)
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', **config.SECTIONS['general']['config'])
-    show_params     = config.ALL_PARAMS
-    info_params     = config.INFO_PARAMS
-    center_params   = config.CENTER_PARAMS
-    shift_params    = config.SHIFT_PARAMS
-    stitch_params   = config.STITCH_PARAMS
+    show_params      = config.ALL_PARAMS
+    info_params      = config.INFO_PARAMS
+    center_params    = config.CENTER_PARAMS
+    shift_params     = config.SHIFT_PARAMS
+    stitch_params    = config.STITCH_PARAMS
+    panoramic_params = config.PANORAMIC_PARAMS
 
     cmd_parsers = [
-        ('init',        init,           (),                 "Create configuration file"),
-        ('status',      status,         show_params,        "Show the tile-cli status"),
-        ('show',        run_show,       info_params,        "Show the file names in tile  location"),
-        ('center',      run_center,     center_params,      "Find the rotation axis location"),
-        ('shift',       run_shift,      shift_params,       "Calculate the tile horizonal shifts"),
-        ('stitch',      run_stitch,     stitch_params,      "Create a single hdf file containing the tile datasets"),
+        ('init',        init,            (),                  "Create configuration file"),
+        ('status',      status,          show_params,         "Show the tile-cli status"),
+        ('show',        run_show,        info_params,         "Show the file names in tile  location"),
+        ('center',      run_center,      center_params,       "Find the rotation axis location"),
+        ('shift',       run_shift,       shift_params,        "Calculate the tile horizonal shifts"),
+        ('panoramic',   run_panoramic,   panoramic_params,    "Save a single stitched projection for quick inspection"),
+        ('stitch',      run_stitch,      stitch_params,       "Create a single hdf file containing the tile datasets"),
     ]
 
     subparsers = parser.add_subparsers(title="Commands", metavar='')
@@ -75,7 +80,11 @@ def main():
         cmd_parser.set_defaults(_func=func)
     
     args = config.parse_known_args(parser, subparser=True)
-    
+
+    if not hasattr(args, '_func'):
+        parser.print_help()
+        sys.exit(0)
+
     # create logger
     logs_home = args.logs_home
 

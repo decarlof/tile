@@ -74,6 +74,10 @@ SECTIONS['general'] = {
         'default': False,
         'help': 'Verbose output',
         'action': 'store_true'},
+    'show': {
+        'default': False,
+        'help': 'Show the panoramic image in a matplotlib window (requires display)',
+        'action': 'store_true'},
         }
 
 SECTIONS['file-io'] = {
@@ -101,7 +105,7 @@ SECTIONS['file-io'] = {
         'type': util.positive_int,
         'default': 0,
         'help': "Reconstruction binning factor as power(2, choice)",
-        'choices': [0, 1, 2, 3]},
+        'choices': [0, 1, 2, 3, 4]},
     'sample-x': {     
         'type': str,
         'default': '/measurement/instrument/sample_motor_stack/setup/x',
@@ -121,7 +125,11 @@ SECTIONS['file-io'] = {
     'step-x': {
         'default': 0,
         'type': float,
-        'help': 'When greater than 0, it is used to manually overide the sample x step size stored in the hdf file'},  
+        'help': 'When greater than 0, it is used to manually overide the sample x step size stored in the hdf file'},
+    'x-shifts': {
+        'default': 'None',
+        'type': str,
+        'help': "Comma-separated list of cumulative x tile shifts in pixels, e.g. [0,100,200]. 'None' = read from metadata."},
     'recon': {
         'default': 'True',
         'type': str,
@@ -129,10 +137,10 @@ SECTIONS['file-io'] = {
         }
 
 SECTIONS['stitch'] = {
-    'x-shifts': {
-        'default': 'None',
-        'type': str,
-        'help': "Projection pairs to find rotation axis. Each second projection in a pair will be flipped and used to find shifts from the first element in a pair. The shifts are used to calculate the center.  Example [0,1499] for a 180 deg scan, or [0,1499,749,2249] for 360, etc.",},            
+    'zinger-level': {
+        'default': 0.08,
+        'type': float,
+        'help': 'Zinger removal threshold: fraction above local temporal median. 0 disables.'},
     'start-proj': {
         'default': 0,
         'type': int,
@@ -141,11 +149,15 @@ SECTIONS['stitch'] = {
         'default': -1,
         'type': int,
         'help': "End projection"},   
-    'nproj-per-chunk': {     
+    'nproj-per-chunk': {
         'default': 64,
-        'type': int,        
-        'help': "Number of of projections for simultaneous processing",},    
-    }    
+        'type': int,
+        'help': "Number of of projections for simultaneous processing",},
+    'max-workers': {
+        'default': 4,
+        'type': int,
+        'help': "Number of parallel threads for chunk processing",},
+    }
 
 SECTIONS['center'] = {
     'nsino': {
@@ -168,13 +180,13 @@ SECTIONS['center'] = {
         'default': -1.0,
         'type': float,
         'help': "LLocation of rotation axis"},
-    'recon-engine': {     
+    'recon-engine': {
         'type': str,
-        'default': 'tomopy',
-        'help': "Reconstruction engine (tomopy or tomocupy). ",},    
+        'default': 'tomocupy',
+        'help': "Reconstruction engine (tomopy or tomocupy). ",},
     'reverse-grid': {
         'type': str,
-        'default': 'False',
+        'default': 'True',
         'help': 'Reverse grid datasets order',},
     'reverse-step': {
         'type': str,
@@ -187,9 +199,22 @@ SECTIONS['center'] = {
     },
     'file-type': {
         'type': str,
-        'default': 'standard',
+        'default': 'double_fov',
         'help': "Tomocupy file type: standard or double_fov",
     },
+    'nsino-per-chunk': {
+        'type': int,
+        'default': 8,
+        'help': "Number of sinograms per chunk. Use larger numbers with computers with larger memory. ",},
+    'flat-linear': {
+        'type': str,
+        'default': 'True',
+        'help': "Interpolate flat fields per projection. Assumes equal number of flats at start and end of scan.",},
+    'flats-file': {
+        'default': '',
+        'type': str,
+        'help': 'Path to HDF5 file with flat field basis frames (from dump_flats). '
+                'If set, flat correction uses a per-projection NNLS linear combination of these frames.'},
 }
 
 
@@ -202,16 +227,13 @@ SECTIONS['shift'] = {
         'type': int,
         'default': 1,
         'help': "+/- center search step (pixel). "},
-    'nsino-per-chunk': {     
-        'type': int,
-        'default': 8,
-        'help': "Number of sinograms per chunk. Use larger numbers with computers with larger memory. ",},    
     }
 
-INFO_PARAMS   = ('file-io',)
-CENTER_PARAMS = ('file-io', 'center')
-SHIFT_PARAMS  = ('file-io', 'center', 'shift')
-STITCH_PARAMS = ('file-io', 'center', 'stitch')
+INFO_PARAMS      = ('file-io',)
+CENTER_PARAMS    = ('file-io', 'center')
+SHIFT_PARAMS     = ('file-io', 'center', 'shift')
+STITCH_PARAMS    = ('file-io', 'center', 'stitch')
+PANORAMIC_PARAMS = ('file-io', 'center', 'stitch')
 ALL_PARAMS    = ('file-io', 'center', 'shift', 'stitch')
 
 NICE_NAMES = ('General', 'File IO', 'Center', 'Shift', 'Stitch')
